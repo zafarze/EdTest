@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    background-color: #f8fafc; /* Светло-серый (Slate-50), а не мятный */
+    color: #1e293b;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+}
+
+/* Анимация плавающих шаров */
+@keyframes blob {
+    0% { transform: translate(0px, 0px) scale(1); }
+    33% { transform: translate(30px, -50px) scale(1.1); }
+    66% { transform: translate(-20px, 20px) scale(0.9); }
+    100% { transform: translate(0px, 0px) scale(1); }
+}
+
+.animate-blob {
+    animation: blob 7s infinite;
+}
+
+.animation-delay-2000 {
+    animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+    animation-delay: 4s;
+}
+
+/* Эффект стекла */
+.glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* Анимация плавающего градиента "Aurora" */
+@keyframes aurora {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+.animate-aurora {
+    background-size: 200% auto;
+    animation: aurora 5s linear infinite;
+}
+
+/* Эффект печатной машинки для placeholder */
+/* Скрываем стандартный placeholder */
+.typing-placeholder::placeholder {
+    color: transparent;
+}
+
+/* Создаем кастомный, который будет анимироваться */
+.typing-container {
+    position: relative;
+}
+
+.typing-container::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 1rem; /* Отступ слева, как у инпута */
+    transform: translateY(-50%);
+    color: #94a3b8; /* Цвет placeholder (slate-400) */
+    pointer-events: none;
+    /* Анимация: печатаем "zafar", ждем, стираем */
+    animation: typing 6s steps(20) infinite;
+    white-space: nowrap;
+    overflow: hidden;
+    border-right: 2px solid transparent; /* Курсор */
+}
+
+/* Когда инпут не пустой или в фокусе, скрываем анимацию */
+.typing-container:focus-within::after,
+.typing-container.has-value::after {
+    display: none;
+}
+
+/* Сама анимация печати */
+@keyframes typing {
+    0%, 100% { width: 0; content: ""; border-right-color: transparent; }
+    10%, 90% { border-right-color: #94a3b8; } /* Курсор мигает */
+    /* Печатаем "zafar" */
+    20%, 40% { width: 3.5rem; content: "zafar"; border-right-color: #94a3b8; } 
+    /* Печатаем "zafar..." */
+    50%, 70% { width: 5rem; content: "zafar..."; border-right-color: #94a3b8; }
+}
+
+/* Анимация движения сетки */
+@keyframes grid-move {
+    0% { background-position: 0 0; }
+    100% { background-position: 40px 40px; }
+}
+
+.animate-grid-flow {
+    animation: grid-move 4s linear infinite;
+}

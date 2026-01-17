@@ -1,0 +1,24 @@
+# IDE и редакторы (каждый разработчик использует свое)
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Статика и медиа (они не должны быть в git, кроме заглушек)
+media/
+staticfiles/
+
+# Логи
+*.log
+django_debug.log
+
+# Временные файлы тестов
+.coverage
+htmlcov/
+
+# Python
+*.spec
+dist/
+build/
+*.egg-info/
+.env

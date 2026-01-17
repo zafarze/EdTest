@@ -1,0 +1,34 @@
+# --- System ---
+.DS_Store
+Thumbs.db
+
+# --- Python / Django (Backend) ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+db.sqlite3
+*.log
+local_settings.py
+media/
+
+# --- Node.js / React (Frontend) ---
+node_modules/
+build/
+dist/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
