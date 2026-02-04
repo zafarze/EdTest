@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ exam.title }}</title>
+    <style>
+        /* --- 1. НАСТРОЙКИ СТРАНИЦЫ (A4) --- */
+        @page {
+            size: A4; /* 210mm x 297mm */
+            margin: 10mm 15mm; /* Поля */
+            
+            /* Нижний колонтитул */
+            @bottom-center {
+                content: element(footer);
+            }
+        }
+
+        body {
+            font-family: "Times New Roman", Times, serif;
+            font-size: 11px;
+            line-height: 1.2;
+            color: #000;
+            margin: 0;
+            padding: 0;
+            /* Опционально: линия на всю высоту страницы (если генератор PDF это поддерживает) */
+            /* background: linear-gradient(to right, transparent 50%, #000 50%, #000 calc(50% + 1px), transparent calc(50% + 1px)); */
+            /* background-size: 100% 297mm; */
+        }
+
+        /* --- УТИЛИТЫ --- */
+        .uppercase { text-transform: uppercase; }
+        .font-bold { font-weight: bold; }
+        .text-center { text-align: center; }
+        .flex { display: flex; }
+        
+        /* --- ШАПКА --- */
+        header {
+            border-bottom: 2px double #000; /* Двойная линия как в превью */
+            padding-bottom: 5px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+        }
+        
+        .header-item {
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .header-center {
+            font-size: 18px;
+        }
+
+        /* --- 2. ГЛАВНЫЙ КОНТЕЙНЕР (КОЛОНКИ) --- */
+        .content-columns {
+            column-count: 2;
+            column-gap: 10mm;
+            column-rule: 1px solid #000; /* Линия между колонками */
+            width: 100%;
+            
+            /* 🔥 ВАЖНО: Заполнять последовательно (Left -> Right) */
+            column-fill: auto; 
+            
+            text-align: left;
+        }
+
+        /* --- СЕКЦИИ (ПРЕДМЕТЫ) --- */
+        .section-container {
+            margin-bottom: 15px;
+            /* 🔥 ИСПРАВЛЕНИЕ: Разрешаем разрыв секции, чтобы вопросы перетекали в след. колонку */
+            break-inside: auto; 
+        }
+
+        .subject-title {
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            margin-top: 5px;
+            text-decoration: underline;
+            text-decoration-style: double; /* Двойное подчеркивание */
+            text-underline-offset: 3px;
+            
+            /* 🔥 Привязываем заголовок к первому вопросу (не оставлять заголовок одним внизу) */
+            break-after: avoid; 
+            page-break-after: avoid;
+        }
+
+        /* --- ВОПРОСЫ --- */
+        .question-block {
+            margin-bottom: 12px;
+            /* Вопрос целиком не должен разрываться */
+            break-inside: avoid; 
+            page-break-inside: avoid;
+            position: relative;
+        }
+
+        .q-text-row {
+            display: flex;
+            gap: 5px;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        
+        /* Для корректного обтекания номера вопроса */
+        .q-number { 
+            float: left; 
+            margin-right: 5px; 
+            font-weight: bold;
+        }
+        .q-content { 
+            display: block; 
+            width: 100%; 
+        }
+
+        /* --- ВАРИАНТЫ ОТВЕТОВ --- */
+        .choices-container {
+            padding-left: 18px; /* Чуть больше отступ */
+        }
+
+        .choice-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 2px;
+            align-items: flex-start; 
+        }
+        
+        .choice-letter { 
+            font-weight: bold; 
+            min-width: 18px; 
+        }
+
+        /* --- ФУТЕР --- */
+        .footer-element {
+            position: running(footer);
+            width: 100%;
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            margin-top: 10px;
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+        }
+
+        .variant-strip {
+            letter-spacing: 1.5em;
+            overflow: hidden;
+            white-space: nowrap;
+            color: #000;
+            opacity: 0.7;
+            padding: 0 20px;
+        }
+
+        /* --- КАРТИНКИ (Ограничения как в React) --- */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 4px 0;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        
+        /* Специфичные размеры для разных типов картинок */
+        .q-image { max-height: 150px; object-fit: contain; }
+        .opt-image { max-height: 80px; object-fit: contain; }
+
+    </style>
+</head>
+<body>
+
+    <div class="footer-element">
+        <span style="color: #000;">ORIGINAL</span>
+        
+        <div class="variant-strip">
+            {% for i in "xxxxxxxxxxxx" %}{{ variant|default:"A" }} {% endfor %}
+        </div>
+
+        <span style="color: #000;">Page <span class="page-number"></span></span>
+    </div>
+
+    <header>
+        <div class="header-item">СИНФИ {{ exam.grade_level }}</div>
+        <div class="header-item header-center">ТЕСТИ УМУМИ {{ exam.gat_round }}</div>
+        <div class="header-item">{{ date|default:"2025-2026" }}</div>
+    </header>
+
+    <div class="content-columns">
+        {% for section in sections %}
+            <div class="section-container">
+                <div class="subject-title">{{ section.subject }}</div>
+                
+                {% for q in section.questions %}
+                    <div class="question-block">
+                        <div class="q-text-row">
+                            <span class="q-number">{{ forloop.counter }}.</span>
+                            <div class="q-content">
+                                <div>{{ q.text|safe }}</div>
+                                
+                                {% if q.image %}
+                                    <img src="{{ q.image.url }}" class="q-image" />
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="choices-container">
+                            {% for choice in q.pdf_choices %}
+                                <div class="choice-row">
+                                    <span class="choice-letter">
+                                        {% if forloop.counter == 1 %}A){% endif %}
+                                        {% if forloop.counter == 2 %}B){% endif %}
+                                        {% if forloop.counter == 3 %}C){% endif %}
+                                        {% if forloop.counter == 4 %}D){% endif %}
+                                        {% if forloop.counter == 5 %}E){% endif %}
+                                        {% if forloop.counter == 6 %}F){% endif %}
+                                    </span>
+                                    
+                                    <div style="display: flex; flex-direction: column;">
+                                        <span class="choice-text">{{ choice.text }}</span>
+                                        
+                                        {% if choice.image %}
+                                            <img src="{{ choice.image.url }}" class="opt-image" />
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+    </div>
+
+</body>
+</html>

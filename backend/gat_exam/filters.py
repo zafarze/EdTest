@@ -17,9 +17,13 @@ class StudentFilter(django_filters.FilterSet):
         fields = ['status', 'gender', 'school_id', 'class_id', 'grade_level']
 
     def filter_search(self, queryset, name, value):
+        # ⚠️ ИСПРАВЛЕНО: Поля должны называться так же, как в models.py (_ru)
         return queryset.filter(
-            django_filters.filters.Q(last_name__icontains=value) |
-            django_filters.filters.Q(first_name__icontains=value) |
+            django_filters.filters.Q(last_name_ru__icontains=value) |
+            django_filters.filters.Q(first_name_ru__icontains=value) |
+            # Можно добавить поиск и по английским/таджикским именам, если нужно:
+            # django_filters.filters.Q(last_name_en__icontains=value) |
+            # django_filters.filters.Q(first_name_en__icontains=value) |
             django_filters.filters.Q(username__icontains=value) |
             django_filters.filters.Q(custom_id__icontains=value)
         )

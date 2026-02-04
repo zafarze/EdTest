@@ -6,7 +6,10 @@ from django.contrib.auth.models import User
 from .models import (
     School, SchoolYear, Quarter, StudentClass, Student, 
     Exam, Question, Choice, Notification, Subject, 
-    Topic, GlobalSettings, UserProfile, ExamResult
+    Topic, GlobalSettings, UserProfile, ExamResult,
+    # Новые модели
+    AIPrompt, QuestionLimit, ExamRound, BookletSection, 
+    SectionQuestion, MasterBooklet
 )
 
 # --- 1. НАСТРОЙКА ПОЛЬЗОВАТЕЛЯ (С ПРОФИЛЕМ) ---
@@ -61,7 +64,7 @@ class SubjectAdmin(admin.ModelAdmin):
     search_fields = ('name', 'abbreviation')
 
 
-# --- 5. ЭКЗАМЕНЫ (🔥 ИСПРАВЛЕНО) ---
+# --- 5. ЭКЗАМЕНЫ ---
 class ChoiceInline(admin.TabularInline):
     model = Choice
     extra = 2
@@ -69,8 +72,8 @@ class ChoiceInline(admin.TabularInline):
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
     inlines = [ChoiceInline]
-    list_display = ('text_short', 'exam', 'topic', 'difficulty', 'question_type')
-    list_filter = ('exam', 'difficulty', 'question_type')
+    list_display = ('text_short', 'topic', 'difficulty', 'question_type')
+    list_filter = ('topic', 'difficulty', 'question_type')
     search_fields = ('text',)
 
     def text_short(self, obj):
@@ -79,18 +82,11 @@ class QuestionAdmin(admin.ModelAdmin):
 
 @admin.register(Exam)
 class ExamAdmin(admin.ModelAdmin):
-    # 🔥 Здесь мы заменили 'subject' на функцию display_subjects
     list_display = ('title', 'display_subjects', 'school', 'gat_round', 'gat_day', 'status', 'date')
-    
-    # 🔥 Здесь заменили 'subject' на 'subjects' (для фильтрации по M2M)
     list_filter = ('subjects', 'school', 'status', 'gat_round', 'exam_type')
-    
     search_fields = ('title',)
-    
-    # 🔥 Добавляем удобный виджет для выбора предметов и классов
-    filter_horizontal = ('subjects', 'classes')
+    filter_horizontal = ('subjects', 'classes', 'questions')
 
-    # Функция для красивого отображения списка предметов в таблице
     def display_subjects(self, obj):
         return ", ".join([s.name for s in obj.subjects.all()])
     display_subjects.short_description = "Предметы"
@@ -99,19 +95,20 @@ class ExamAdmin(admin.ModelAdmin):
 # --- 6. ТЕМЫ ---
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
-    list_display = ('title', 'subject', 'grade_level', 'quarter') # Убрал 'school'
+    list_display = ('title', 'subject', 'grade_level', 'quarter')
     filter_horizontal = ('schools',)
 
 
 # --- 7. УЧЕНИКИ ---
 @admin.register(Student)
 class StudentAdmin(admin.ModelAdmin):
-    list_display = ('last_name_ru', 'first_name_ru', 'school', 'student_class', 'status')
+    list_display = ('last_name_ru', 'first_name_ru', 'school', 'student_class', 'username', 'status')
     list_filter = ('school', 'status', 'gender')
     search_fields = ('last_name_ru', 'first_name_ru', 'custom_id', 'username')
+    list_editable = ('status',)
 
 
-# --- 8. ОСТАЛЬНОЕ ---
+# --- 8. ОСТАЛЬНОЕ (Уведомления, Настройки, Результаты) ---
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
     list_display = ('title', 'user', 'type', 'is_read', 'created_at')
@@ -125,3 +122,56 @@ class GlobalSettingsAdmin(admin.ModelAdmin):
 class ExamResultAdmin(admin.ModelAdmin):
     list_display = ('student', 'exam', 'score', 'percentage')
     list_filter = ('exam',)
+
+
+# --- 9. 🔥 ЛИМИТЫ ВОПРОСОВ (QuestionCounts) ---
+@admin.register(QuestionLimit)
+class QuestionLimitAdmin(admin.ModelAdmin):
+    list_display = ('school', 'grade_level', 'subject', 'count')
+    list_filter = ('school', 'grade_level', 'subject')
+    list_editable = ('count',)
+
+
+# --- 10. 🔥 SMART BOOKLET (Раунды и Секции) ---
+@admin.register(ExamRound)
+class ExamRoundAdmin(admin.ModelAdmin):
+    list_display = ('name', 'date', 'is_active', 'target_easy_pct', 'target_medium_pct', 'target_hard_pct')
+    list_editable = ('is_active', 'date')
+
+class SectionQuestionInline(admin.TabularInline):
+    model = SectionQuestion
+    extra = 1
+    raw_id_fields = ('question',) # Чтобы админка не висла, если вопросов тысячи
+
+@admin.register(BookletSection)
+class BookletSectionAdmin(admin.ModelAdmin):
+    list_display = ('subject', 'round', 'grade_level', 'day', 'status', 'expert')
+    list_filter = ('round', 'subject', 'status', 'grade_level')
+    inlines = [SectionQuestionInline]
+
+@admin.register(MasterBooklet)
+class MasterBookletAdmin(admin.ModelAdmin):
+    list_display = ('round', 'is_generated', 'generated_at')
+
+
+# --- 11. 🧠 AI PROMPTS (МОЗГ СИСТЕМЫ) ---
+@admin.register(AIPrompt)
+class AIPromptAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'model_name', 'temperature', 'updated_at', 'is_active')
+    list_editable = ('model_name', 'temperature', 'is_active')
+    search_fields = ('name', 'slug')
+    readonly_fields = ('slug',) # Slug зашит в код, его лучше не менять руками
+    
+    fieldsets = (
+        ("Системная информация", {
+            "fields": ("name", "slug", "is_active")
+        }),
+        ("Настройки Нейросети", {
+            "fields": ("model_name", "temperature"),
+            "description": "Temperature: 0 - робот (строго), 1 - художник (креативно)."
+        }),
+        ("Инструкции (Prompts)", {
+            "fields": ("system_role", "user_template"),
+            "description": "Используйте {text}, {choices} и другие переменные в шаблоне User."
+        }),
+    )

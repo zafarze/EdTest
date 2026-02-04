@@ -1,185 +1,184 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Avg, Count, F, Q
-from django.db.models.functions import Coalesce
+from rest_framework import status
+from django.db.models import Avg, Count
 from collections import defaultdict
+import re
 
-# Импорты моделей
-from ..models import School, ExamResult, Student, Subject, StudentClass
+# Импорт моделей
+from ..models import ExamResult, Student
+from ..services.ai_service import generate_class_report
 
-class AnalyticsView(APIView):
+# ==========================================
+# 1. AI REPORT (Без изменений)
+# ==========================================
+class ExamReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            report_text = generate_class_report(pk)
+            return Response({"report": report_text}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ==========================================
+# 2. DASHBOARD ANALYTICS
+# ==========================================
+class DashboardAnalyticsView(APIView):
     """
-    Оптимизированная аналитика.
-    Использует Aggregation и Python-группировку вместо циклов по БД.
+    URL: /api/analytics/dashboard/
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        
-        # --- 1. ОПРЕДЕЛЕНИЕ ОБЛАСТИ ВИДИМОСТИ (SCOPING) ---
-        # По умолчанию берем всё
-        schools_qs = School.objects.all()
-        results_qs = ExamResult.objects.all()
+        # 1. Читаем фильтры
+        schools_param = request.query_params.get('schools')
+        classes_param = request.query_params.get('classes')
+        gats_param = request.query_params.get('gats')
 
-        # Если это Директор — сужаем область видимости до его школы
-        if hasattr(user, 'profile') and user.profile.role == 'director':
-            if user.profile.school:
-                my_school_id = user.profile.school.id
-                schools_qs = schools_qs.filter(id=my_school_id)
-                results_qs = results_qs.filter(student__school_id=my_school_id)
-            else:
-                # Если у директора нет школы, возвращаем пустые данные
-                return Response({"chart_schools": [], "leaders": [], "matrix": [], "kpi": {}})
+        # 2. Базовый запрос
+        queryset = ExamResult.objects.select_related(
+            'student', 'student__school', 'student__student_class', 'exam'
+        ).all()
 
-        # --- 2. KPI (ОБЩИЕ ПОКАЗАТЕЛИ) ---
-        # Считаем одной командой агрегации
-        kpi_stats = results_qs.aggregate(
-            avg_score=Avg('score'),
-            total_students=Count('student', distinct=True) # Уникальные ученики, сдававшие экзамены
-        )
-        
-        raw_avg = kpi_stats['avg_score'] or 0
-        # Логика конвертации 100 -> 10
-        avg_gat_10 = round(raw_avg / 10, 1) if raw_avg > 10 else round(raw_avg, 1)
+        # 3. Применяем фильтры
+        if schools_param:
+            try:
+                ids = [int(x) for x in schools_param.split(',') if x.isdigit()]
+                if ids:
+                    queryset = queryset.filter(student__school__id__in=ids)
+            except: pass
 
-        # --- 3. ГРАФИК ШКОЛ (БЫСТРАЯ АГРЕГАЦИЯ) ---
-        # Coalesce нужен, чтобы заменить None на 0, если результатов нет
-        schools_data = schools_qs.annotate(
-            avg_raw=Coalesce(Avg('students__results__score'), 0.0)
-        ).values('name', 'avg_raw').order_by('-avg_raw')
+        if classes_param:
+            target_grades = []
+            for item in classes_param.split(','):
+                digits = re.findall(r'\d+', item)
+                if digits: target_grades.append(int(digits[0]))
+            if target_grades:
+                queryset = queryset.filter(student__student_class__grade_level__in=target_grades)
 
-        schools_chart = []
-        top_school_name = "-"
+        if gats_param:
+            target_rounds = []
+            for item in gats_param.split(','):
+                digits = re.findall(r'\d+', item)
+                if digits: target_rounds.append(int(digits[0]))
+            if target_rounds:
+                # ВАЖНО: Проверь, как называется поле в модели Exam (round_id или gat_round)
+                # Обычно это gat_round или просто round
+                queryset = queryset.filter(exam__gat_round__in=target_rounds)
 
-        for s in schools_data:
-            val = s['avg_raw']
-            score_10 = round(val / 10, 1) if val > 10 else round(val, 1)
-            
-            schools_chart.append({
-                "name": s['name'],
-                "score": score_10,
-                "prev": round(score_10 * 0.95, 1) # Имитация динамики (можно заменить на реальную логику)
+        # Если данных нет
+        if not queryset.exists():
+            return Response({
+                "kpi": {"avg_gat": 0, "total_students": 0, "top_school": "-"},
+                "leaders": [],
+                "chart_schools": [],
+                "chart_subjects": [], # Пустой список
+                "matrix": []
             })
-        
-        if schools_chart:
-            top_school_name = schools_chart[0]['name']
 
-        # --- 4. ТОП УЧЕНИКИ (LEADERS) ---
-        # select_related ускоряет получение имен и названий школ
-        top_students = results_qs.select_related('student', 'student__school')\
-            .order_by('-score')[:5]
-            
-        leaders_data = [
-            {
+        # --- РАСЧЕТ KPI ---
+        total_students = queryset.count()
+        avg_gat = queryset.aggregate(Avg('percentage'))['percentage__avg'] or 0
+        
+        top_school_data = queryset.values('student__school__name').annotate(
+            avg=Avg('percentage')
+        ).order_by('-avg').first()
+        top_school = top_school_data['student__school__name'] if top_school_data else "-"
+
+        # --- ТОП 5 УЧЕНИКОВ ---
+        leaders_qs = queryset.order_by('-score')[:5]
+        leaders = []
+        for res in leaders_qs:
+            leaders.append({
                 "id": res.student.id,
                 "name": f"{res.student.last_name_ru} {res.student.first_name_ru}",
-                "school": res.student.school.name,
-                "score": int(res.score)
-            }
-            for res in top_students
-        ]
-
-        # --- 5. МАТРИЦА 1-10 (SUPER OPTIMIZED) ---
-        
-        # Шаг А: Получаем "плоский" список всех нужных данных одним запросом
-        # Мы берем только результаты активных предметов
-        raw_matrix_data = results_qs.filter(exam__subjects__is_active=True).values(
-            'exam__subjects__id',
-            'exam__subjects__name',
-            'exam__subjects__color', # Если есть поле color
-            'student__student_class__grade_level',
-            'student__student_class__section',
-            'score'
-        )
-
-        # Шаг Б: Группировка в Python (Это намного быстрее, чем 300 запросов к БД)
-        # Структура: tree[subject_id][grade][section] = [scores...]
-        tree = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-        subject_meta = {} # Храним названия и цвета предметов
-
-        for row in raw_matrix_data:
-            subj_id = row['exam__subjects__id']
-            subj_name = row['exam__subjects__name']
-            subj_color = row.get('exam__subjects__color', 'blue') # Fallback цвет
-            
-            grade = row['student__student_class__grade_level']
-            section = row['student__student_class__section']
-            score = row['score']
-            
-            # Сохраняем метаданные предмета (чтобы не потерять при группировке)
-            if subj_id not in subject_meta:
-                subject_meta[subj_id] = {'name': subj_name, 'color': subj_color}
-            
-            if grade and section: # Проверка на всякий случай
-                tree[subj_id][grade][section].append(score)
-
-        # Шаг В: Формируем итоговый JSON для фронтенда
-        final_matrix = []
-
-        for subj_id, grades_data in tree.items():
-            meta = subject_meta[subj_id]
-            
-            grades_list = []
-            
-            # Сортируем параллели (11, 10, 9...)
-            for grade in sorted(grades_data.keys(), reverse=True):
-                classes_list = []
-                sections_data = grades_data[grade]
-                
-                # Сортируем классы (А, Б, В...)
-                for section in sorted(sections_data.keys()):
-                    scores = sections_data[section]
-                    total_students = len(scores)
-                    
-                    # Расчет среднего
-                    avg_val = sum(scores) / total_students if total_students > 0 else 0
-                    avg_10 = round(avg_val / 10, 1) if avg_val > 10 else round(avg_val, 1)
-
-                    # Расчет распределения (1-10)
-                    marks_dist = {i: 0 for i in range(1, 11)}
-                    for s in scores:
-                        # Конвертация
-                        val = s / 10 if s > 10 else s
-                        mark = int(round(val))
-                        # Защита границ
-                        if mark < 1: mark = 1
-                        if mark > 10: mark = 10
-                        marks_dist[mark] += 1
-                    
-                    classes_list.append({
-                        "name": f"{grade} \"{section}\"",
-                        "marks": marks_dist,
-                        "total": total_students,
-                        "avg": avg_10
-                    })
-                
-                grades_list.append({
-                    "level": f"{grade} Классы",
-                    "classes": classes_list
-                })
-            
-            # Добавляем предмет в итоговый список
-            final_matrix.append({
-                "id": subj_id,
-                "title": meta['name'],
-                # Можно мапить цвета на фронте, или передавать отсюда
-                "color": f"text-{meta.get('color', 'indigo')}-600", 
-                "bg": f"bg-{meta.get('color', 'indigo')}-50",
-                "grades": grades_list
+                "school": res.student.school.name if res.student.school else "Школа",
+                "score": res.score
             })
 
-        # Сортировка предметов по названию
-        final_matrix.sort(key=lambda x: x['title'])
+        # --- ГРАФИК 1: ПО ШКОЛАМ ---
+        schools_stats = queryset.values('student__school__name').annotate(
+            score=Avg('percentage')
+        ).order_by('-score')
+        
+        chart_schools = []
+        for s in schools_stats:
+            chart_schools.append({
+                "name": s['student__school__name'],
+                "score": round(s['score'], 1),
+                "prev": 0 
+            })
+
+        # --- 🔥 НОВОЕ: ГРАФИК 2: ПО ПРЕДМЕТАМ ---
+        # Группируем по имени предмета, связанного с экзаменом
+        subjects_stats = queryset.values('exam__subjects__name').annotate(
+            score=Avg('percentage')
+        ).order_by('-score')
+
+        chart_subjects = []
+        for s in subjects_stats:
+            subj_name = s['exam__subjects__name']
+            if subj_name: # Исключаем None
+                chart_subjects.append({
+                    "name": subj_name,
+                    "score": round(s['score'], 1)
+                })
+
+        # --- МАТРИЦА ОЦЕНОК ---
+        tree = defaultdict(lambda: defaultdict(lambda: {
+            "marks": defaultdict(int), "total": 0, "sum_pct": 0
+        }))
+
+        for res in queryset:
+            cls_obj = res.student.student_class
+            if not cls_obj: continue
+            
+            try:
+                section = getattr(cls_obj, 'section', '')
+                cls_name = f"{cls_obj.grade_level}-{section}" if section else f"{cls_obj.grade_level}"
+                level = f"{cls_obj.grade_level} Класс"
+            except:
+                level = "Неизвестно"
+                cls_name = str(cls_obj)
+
+            if res.percentage == 100: mark = 10
+            else: mark = int(res.percentage // 10) + 1
+            if mark < 1: mark = 1
+            if mark > 10: mark = 10
+
+            tree[level][cls_name]["marks"][mark] += 1
+            tree[level][cls_name]["total"] += 1
+            tree[level][cls_name]["sum_pct"] += res.percentage
+
+        grades_list = []
+        sorted_levels = sorted(tree.keys(), key=lambda x: int(x.split()[0]) if x.split()[0].isdigit() else 0, reverse=True)
+
+        for level in sorted_levels:
+            classes_data = []
+            for cls_name, data in tree[level].items():
+                avg = round(data["sum_pct"] / data["total"], 1) if data["total"] > 0 else 0
+                classes_data.append({
+                    "name": cls_name,
+                    "marks": data["marks"],
+                    "total": data["total"],
+                    "avg": avg
+                })
+            classes_data.sort(key=lambda x: x["name"])
+            grades_list.append({"level": level, "classes": classes_data})
+
+        matrix = [{"id": 1, "title": "GAT (Общий)", "grades": grades_list}]
 
         return Response({
-            "chart_schools": schools_chart,
-            "leaders": leaders_data,
-            "matrix": final_matrix,
             "kpi": {
-                "avg_gat": avg_gat_10,
-                "total_students": kpi_stats['total_students'], # Общее число уникальных учеников
-                "top_school": top_school_name
-            }
-        })
+                "avg_gat": round(avg_gat, 1),
+                "total_students": total_students,
+                "top_school": top_school
+            },
+            "leaders": leaders,
+            "chart_schools": chart_schools,
+            "chart_subjects": chart_subjects, # 🔥 Отправляем новые данные
+            "matrix": matrix
+        }, status=status.HTTP_200_OK)

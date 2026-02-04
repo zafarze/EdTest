@@ -1,70 +1,61 @@
-"""
-Django settings for config project.
-Revised for GAT Premium White Label support.
-"""
-
 import os
 from pathlib import Path
+import environ
 from datetime import timedelta
-from dotenv import load_dotenv
 
-# Загружаем переменные из .env
-load_dotenv()
+# Инициализация переменных окружения
+env = environ.Env(
+    DEBUG=(bool, False)
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-test-key-replace-in-production')
+# Читаем .env файл только если он есть (локальная разработка)
+# В Cloud Run переменных из файла не будет, они придут из настроек сервиса
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG') == 'True'
+# --- SECURITY ---
+SECRET_KEY = env('SECRET_KEY', default='django-insecure-change-me-locally')
+DEBUG = env('DEBUG', default=False)
 
-ALLOWED_HOSTS = ['*']
-
+ALLOWED_HOSTS = ['*'] # Разрешаем Google Cloud Run
 
 # --- APPLICATION DEFINITION ---
-
 INSTALLED_APPS = [
-    # 1. Admin Interface (Jazzmin must be before admin)
     'jazzmin',
     'django.contrib.admin',
-
-    # 2. Django Core
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # 3. Third Party
-    'corsheaders',            # Для связи с React
-    'rest_framework',         # API
+    # Third Party
+    'corsheaders',            
+    'rest_framework',         
     'rest_framework.authtoken',
-    'django_filters',         # Фильтрация
-    'djoser',                 # Auth/Registration
+    'django_filters',         
+    'djoser', 
+    'storages',               # <--- ВАЖНО для Google Storage
+    'django_celery_results',
 
-    # 4. Local Apps (Project)
+    # Local Apps
     'gat_exam.apps.GatExamConfig',
 ]
 
 MIDDLEWARE = [
-    # 1. CORS (Must be first!)
-    'corsheaders.middleware.CorsMiddleware',
-
-    # 2. Security
+    'corsheaders.middleware.CorsMiddleware',                  # 1. CORS
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',             # 2. WhiteNoise (Статика)
     'django.contrib.sessions.middleware.SessionMiddleware',
-
-    # 3. I18n / L10n (Language switcher) - ВАЖНО для перевода
     'django.middleware.locale.LocaleMiddleware', 
-
-    # 4. Common
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'gat_exam.middleware.ActiveUserMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -86,80 +77,73 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-
 # --- DATABASE ---
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
+# Если есть DATABASE_URL (в облаке), используем Postgres.
+# Если нет — SQLite (локально).
+if env('DATABASE_URL', default=None):
+    DATABASES = {
+        'default': env.db('DATABASE_URL')
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
-
-# --- PASSWORD VALIDATION ---
+# --- PASSWORDS ---
 AUTH_PASSWORD_VALIDATORS = [
-    { 'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator', },
-    { 'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', },
-    { 'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator', },
-    { 'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator', },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# --- AUTHENTICATION BACKENDS ---
-# Говорим Django сначала проверять наш кастомный бекенд (Email + Username),
-# а если не вышло — пробовать стандартный.
 AUTHENTICATION_BACKENDS = [
-    'gat_exam.backends.EmailOrUsernameModelBackend',  # 👈 Твой класс из backends.py
-    'django.contrib.auth.backends.ModelBackend',      # Стандартный (на всякий случай)
+    'gat_exam.backends.EmailOrUsernameModelBackend', 
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
-# --- INTERNATIONALIZATION (I18N) ---
-LANGUAGE_CODE = 'ru' # По умолчанию Русский
-
-TIME_ZONE = 'Asia/Dushanbe' # Установил часовой пояс Таджикистана
-
+# --- I18N ---
+LANGUAGE_CODE = 'ru'
+TIME_ZONE = 'Asia/Dushanbe'
 USE_I18N = True
 USE_TZ = True
 
-# Поддерживаемые языки
 LANGUAGES = [
     ('ru', 'Russian'),
     ('en', 'English'),
     ('tj', 'Tajik'), 
 ]
 
-
-# --- STATIC & MEDIA ---
-STATIC_URL = 'static/'
+# --- STATIC & MEDIA (САМОЕ ВАЖНОЕ) ---
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Настройка хранилищ (Django 4.2+)
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
+# Если указан бакет (в облаке) - переключаем медиа на Google Cloud
+GS_BUCKET_NAME = env('GS_BUCKET_NAME', default=None)
 
-# --- CORS SETTINGS (Fix Network Error) ---
-# В режиме разработки разрешаем ВСЁ.
-CORS_ALLOW_ALL_ORIGINS = True 
-CORS_ALLOW_CREDENTIALS = True
+if GS_BUCKET_NAME:
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+    }
+    MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
+else:
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
-# 🔥 ВАЖНО: Разрешаем заголовки авторизации, чтобы браузер пропускал токен
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-]
-
-
-# --- REST FRAMEWORK ---
+# --- REST & JWT ---
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -170,15 +154,11 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
 }
 
-# --- AUTH & JWT ---
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    
-    # 🔥 ИСПРАВЛЕНИЕ: Разрешаем и 'Bearer' (стандарт), и 'JWT' (твой React)
     'AUTH_HEADER_TYPES': ('Bearer', 'JWT'), 
 }
 
-# --- 🔥 DJOSER SETTINGS (ГЛАВНОЕ ИСПРАВЛЕНИЕ) ---
 DJOSER = {
     'LOGIN_FIELD': 'username',
     'USER_CREATE_PASSWORD_RETYPE': True,
@@ -189,35 +169,31 @@ DJOSER = {
     },
 }
 
-
-# --- JAZZMIN (ADMIN UI) ---
+# --- JAZZMIN ---
 JAZZMIN_SETTINGS = {
     "site_title": "Premium GAT Admin",
     "site_header": "GAT Premium",
     "site_brand": "GAT Control",
     "welcome_sign": "Добро пожаловать в Центр Управления",
-    "copyright": "Premium GAT Ltd",
-    "search_model": ["auth.User", "gat_exam.Student"], 
-    
-    "icons": {
-        "auth": "fas fa-users-cog",
-        "auth.user": "fas fa-user-shield",
-        "auth.Group": "fas fa-users",
-        "gat_exam.School": "fas fa-school",
-        "gat_exam.Student": "fas fa-user-graduate",
-        "gat_exam.Exam": "fas fa-file-signature",
-        "gat_exam.Question": "fas fa-question",
-    },
-
+    "search_model": ["auth.User", "gat_exam.Student"],
     "topmenu_links": [
         {"name": "Главная", "url": "admin:index", "permissions": ["auth.view_user"]},
-        {"name": "Открыть Сайт", "url": "http://localhost:5173", "new_window": True},
+        {"name": "Открыть Сайт", "url": "/", "new_window": True},
     ],
     "show_sidebar": True,
     "navigation_expanded": True,
 }
+JAZZMIN_UI_TWEAKS = {"theme": "darkly"}
 
-JAZZMIN_UI_TWEAKS = {
-    "theme": "darkly", # Темная тема
-    "dark_mode_theme": "darkly",
-}
+# --- CORS ---
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ['https://*.run.app'] # Доверяем доменам Cloud Run
+
+# --- CELERY ---
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE

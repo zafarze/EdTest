@@ -1,52 +1,51 @@
-from rest_framework import viewsets
-from rest_framework.exceptions import ValidationError
-# 👇 Импортируем наш новый файл прав
-from ..permissions import IsVipOrReadOnly
+import logging
+from rest_framework import viewsets, permissions
+from rest_framework.response import Response
+from django.db.models import Count
+
+# Импортируем модели и сериализаторы
 from ..models import SchoolYear, Quarter
 from ..serializers import SchoolYearSerializer, QuarterSerializer
+from ..permissions import IsVipOrReadOnly
+
+logger = logging.getLogger(__name__)
 
 # --- 1. УЧЕБНЫЕ ГОДЫ ---
 class SchoolYearViewSet(viewsets.ModelViewSet):
-    queryset = SchoolYear.objects.all().order_by('start_date')
+    # Сортируем по убыванию (сначала новые годы)
+    queryset = SchoolYear.objects.all().order_by('-start_date')
     serializer_class = SchoolYearSerializer
-    # 🔥 ТЕПЕРЬ ЗАЩИЩЕНО: Создавать годы могут только VIP
-    permission_classes = [IsVipOrReadOnly] 
+    # 🔥 Создавать/удалять годы могут только VIP (Админ/Ген.дир)
+    permission_classes = [permissions.IsAuthenticated, IsVipOrReadOnly]
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        logger.info(f"📅 [AUDIT] School Year Created: {instance.name} by {self.request.user}")
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        logger.info(f"✏️ [AUDIT] School Year Updated: {instance.name} by {self.request.user}")
+
+    def perform_destroy(self, instance):
+        name = instance.name
+        instance.delete()
+        logger.info(f"🗑️ [AUDIT] School Year Deleted: {name} by {self.request.user}")
+
 
 # --- 2. ЧЕТВЕРТИ ---
 class QuarterViewSet(viewsets.ModelViewSet):
-    queryset = Quarter.objects.all()
+    queryset = Quarter.objects.all().order_by('start_date')
     serializer_class = QuarterSerializer
-    # 🔥 ТЕПЕРЬ ЗАЩИЩЕНО: Четверти меняют только VIP (админы/гендиректор)
-    permission_classes = [IsVipOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated, IsVipOrReadOnly]
 
     def perform_create(self, serializer):
-        start = serializer.validated_data.get('start_date')
+        # Вся логика поиска года теперь внутри serializer.save() -> validate()
+        instance = serializer.save()
         
-        matching_year = SchoolYear.objects.filter(
-            start_date__lte=start, 
-            end_date__gte=start
-        ).first()
-
-        if not matching_year:
-            raise ValidationError(
-                {"start_date": ["Ошибка! На эту дату не найден Учебный Год. Сначала создайте Год (например, 01.09.2025 - 25.05.2026)."]}
-            )
-
-        serializer.save(school_year=matching_year)
+        # Безопасное получение имени года для логов
+        year_name = instance.school_year.name if instance.school_year else "Unknown"
+        logger.info(f"✅ Quarter Created: {instance.name} (Year: {year_name}) by {self.request.user}")
 
     def perform_update(self, serializer):
-        start = serializer.validated_data.get('start_date')
-        # Если дату меняют, проверяем снова
-        if start:
-            matching_year = SchoolYear.objects.filter(
-                start_date__lte=start, 
-                end_date__gte=start
-            ).first()
-            
-            if not matching_year:
-                raise ValidationError(
-                    {"start_date": ["Дата четверти должна быть внутри дат существующего Учебного Года!"]}
-                )
-            serializer.save(school_year=matching_year)
-        else:
-            serializer.save()
+        instance = serializer.save()
+        logger.info(f"✏️ Quarter Updated: {instance.name} by {self.request.user}")
